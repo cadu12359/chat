@@ -1,0 +1,61 @@
+services:
+  # ─── LLM: Ollama com Phi-3 ──────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  # ─── Init: baixa o modelo phi3 automaticamente ─────────
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "========================================="
+        echo "  Baixando modelo phi3 (~2.3 GB)..."
+        echo "  (Isso pode demorar na primeira vez)"
+        echo "========================================="
+        ollama pull phi3
+        echo "========================================="
+        echo "  ✅ Modelo phi3 pronto!"
+        echo "========================================="
+
+  # ─── Transcrição de Áudio: Whisper API ─────────────────
+  whisper-api:
+    build: ./whisper-api
+    container_name: whisper-api
+    volumes:
+      - whisper_cache:/root/.cache
+
+  # ─── Frontend + Reverse Proxy: Nginx ───────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: chat-frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ollama
+      - whisper-api
+
+volumes:
+  ollama_data:
+  whisper_cache:
