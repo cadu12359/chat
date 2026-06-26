@@ -7,7 +7,6 @@
 let messages = [];       // Histórico de mensagens { role, content }
 let pdfContext = null;   // Texto extraído do PDF
 let pdfFileName = null;
-let audioContext = null; // Texto transcrito do áudio
 let audioFileName = null;
 let isGenerating = false;
 
@@ -57,8 +56,8 @@ btnNewChat.addEventListener('click', newChat);
 // Chat: Enviar Mensagem
 // ═══════════════════════════════════════════════════════════
 
-async function sendMessage() {
-    const text = userInput.value.trim();
+async function sendMessage(directText) {
+    const text = directText || userInput.value.trim();
     if (!text || isGenerating) return;
 
     // Esconde tela de boas-vindas
@@ -69,8 +68,10 @@ async function sendMessage() {
     messages.push({ role: 'user', content: text });
 
     // Limpa input
-    userInput.value = '';
-    userInput.style.height = 'auto';
+    if (!directText) {
+        userInput.value = '';
+        userInput.style.height = 'auto';
+    }
     btnSend.disabled = true;
 
     // Monta mensagens para a API
@@ -158,23 +159,17 @@ async function sendMessage() {
 function buildApiMessages() {
     const apiMessages = [];
 
-    // System prompt com contextos carregados
+    // System prompt com contexto de PDF (se houver)
     let systemContent =
         'Você é um assistente IA útil, inteligente e amigável. ' +
-        'Responda sempre em português do Brasil de forma clara e objetiva.';
+        'Responda sempre em português do Brasil de forma clara e objetiva. ' +
+        'Seja direto e conciso nas respostas.';
 
     if (pdfContext) {
         systemContent +=
             '\n\nO usuário carregou um documento PDF. ' +
             'Use o conteúdo extraído abaixo como referência para responder perguntas:\n\n' +
             '--- INÍCIO DO PDF ---\n' + pdfContext + '\n--- FIM DO PDF ---';
-    }
-
-    if (audioContext) {
-        systemContent +=
-            '\n\nO usuário carregou um arquivo de áudio. ' +
-            'Use a transcrição abaixo como referência para responder perguntas:\n\n' +
-            '--- INÍCIO DA TRANSCRIÇÃO ---\n' + audioContext + '\n--- FIM DA TRANSCRIÇÃO ---';
     }
 
     apiMessages.push({ role: 'system', content: systemContent });
@@ -234,12 +229,13 @@ async function handlePdfSelect(e) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Áudio: Upload e Transcrição
+// Áudio: Upload, Transcrição e Envio Automático
 // ═══════════════════════════════════════════════════════════
 
 async function handleAudioSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
+    if (isGenerating) return;
 
     hideWelcome();
     const badge = addContextBadge('audio', file.name, 'Transcrevendo...');
@@ -264,17 +260,24 @@ async function handleAudioSelect(e) {
             throw new Error(data.error);
         }
 
-        audioContext = data.text;
+        const transcription = data.text.trim();
         audioFileName = file.name;
         const duration = data.duration ? Math.round(data.duration) + 's' : '';
         const lang = data.language ? ' · ' + data.language.toUpperCase() : '';
         finalizeBadge(badge, file.name, duration + lang);
 
-        appendSystemMessage(
-            '🎤 Áudio "' + file.name + '" transcrito com sucesso' +
-            (data.duration ? ' (' + Math.round(data.duration) + ' segundos)' : '') +
-            '. Faça perguntas sobre o conteúdo!'
-        );
+        // Auto-remove badge após 3 segundos (não é contexto persistente)
+        setTimeout(() => {
+            const audioBadge = document.getElementById('badge-audio');
+            if (audioBadge) removeBadge(audioBadge);
+        }, 3000);
+
+        // Envia a transcrição diretamente como mensagem do usuário
+        if (transcription) {
+            await sendMessage(transcription);
+        } else {
+            appendSystemMessage('⚠️ O áudio foi transcrito mas nenhum texto foi detectado.');
+        }
 
     } catch (error) {
         removeBadge(badge);
@@ -292,7 +295,6 @@ function newChat() {
     messages = [];
     pdfContext = null;
     pdfFileName = null;
-    audioContext = null;
     audioFileName = null;
     isGenerating = false;
 
